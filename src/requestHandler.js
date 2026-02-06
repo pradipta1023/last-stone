@@ -4,9 +4,9 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const buffer = new Uint8Array(1024);
 
-const broadcast = async (players) => {
+const broadcast = async (players, message) => {
   for (const player of players) {
-    await player.conn.write(encoder.encode("Ready to play!!"));
+    await player.conn.write(encoder.encode(message));
   }
 };
 
@@ -17,7 +17,7 @@ const getUserInput = async (player) => {
 };
 
 const handleConnection = async (players) => {
-  await broadcast(players);
+  await broadcast(players, "\nReady to play!!\n");
   let noOfSticks = 8;
   let turn = 0;
   while (noOfSticks > 0) {
@@ -26,7 +26,9 @@ const handleConnection = async (players) => {
     const userInput = await getUserInput(player);
     turn = 1 - turn;
     noOfSticks -= userInput;
+    await broadcast(players, `\nSticks left: ${noOfSticks}\n`);
   }
+  broadcast(players, `Winner: Player${(1 - turn) + 1}`);
 };
 
 export const listen = async (port) => {
