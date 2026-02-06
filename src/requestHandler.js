@@ -15,18 +15,21 @@ const isInRange = (value) => value >= 1 && value <= 3;
 const write = async (conn, message) =>
   await conn.write(encoder.encode(message));
 
-const getUserInput = async (player) => {
+const getUserInput = async (player, noOfSticks) => {
   await write(player.conn, "\nEnter your move \n> ");
   const bytesRead = await player.conn.read(buffer);
+  if (bytesRead === null) return { isClosed: true };
   const userInput = decoder.decode(buffer.slice(0, bytesRead));
   const parsedInput = +userInput;
+  const isNotInteger = !Number.isInteger(parsedInput);
+  const sticksLeft = noOfSticks - parsedInput;
 
-  if (!Number.isInteger(parsedInput) || !isInRange(parsedInput)) {
-    await write(player.conn, `\n${userInput} is not a valid move\n`);
+  if (isNotInteger || !isInRange(parsedInput) || sticksLeft < 0) {
+    await write(player.conn, `\n${userInput.trim()} is not a valid move\n`);
     return getUserInput(player);
   }
 
-  return parsedInput;
+  return { parsedInput };
 };
 
 const closeConnections = async (players) => {
@@ -37,25 +40,75 @@ const closeConnections = async (players) => {
 
 const handleConnection = async (players) => {
   await broadcast(players, "\nReady to play!!\n");
-  let noOfSticks = 8;
-  let turn = 0;
+  let [noOfSticks, turn, isError] = [8, 0, false];
+
   while (noOfSticks > 0) {
-    const userInput = await getUserInput(players[turn]);
+    const userInput = await getUserInput(players[turn], noOfSticks);
+    if (userInput.isClosed) {
+      players.splice(turn, 1);
+      isError = true;
+      break;
+    }
     turn = 1 - turn;
-    noOfSticks -= userInput;
+    noOfSticks -= Number(userInput.parsedInput);
     await broadcast(players, `\nSticks left: ${noOfSticks}\n`);
+    if (noOfSticks === 1) break;
   }
-  await broadcast(players, `Winner: Player${(1 - turn) + 1}\n`);
+
+  if (isError) await broadcast(players, "\nYour opponent left\n");
+  else await broadcast(players, `Winner: ${players[1 - turn].name}\n`);
   await closeConnections(players);
+};
+
+const lobby = {};
+
+function* generateId() {
+  let i = 0;
+  while (true) {
+    yield i++;
+  }
+}
+
+const handleLobby = async (roomId) => {
+  console.log(`Room opened with room id: ${roomId}`);
+
+  let i = 0;
+  for (const player of lobby[roomId]) {
+    await player.conn.write(encoder.encode("\nEnter your name\n> "));
+    const bytesRead = await player.conn.read(buffer);
+    if (bytesRead === null) {
+      players.splice(i, 1);
+      broadcast(lobby[roomId], "Your opponent left");
+      return;
+    }
+    const name = decoder.decode(buffer.subarray(0, bytesRead));
+    player["name"] = name;
+    i++;
+  }
+
+  await handleConnection(lobby[roomId]);
+  console.log(`Room closed with room id: ${roomId}`);
+
+  delete lobby[roomId];
 };
 
 export const listen = async (port) => {
   const listener = await init(port);
+  const idIterator = generateId();
   let players = [];
+  let currentLobbyId;
   for await (const conn of listener) {
     players.push({ conn });
+    if (players.length === 1) {
+      currentLobbyId = idIterator.next().value;
+      lobby[currentLobbyId] = players;
+      await broadcast(
+        lobby[currentLobbyId],
+        `\nWaiting for another player to join\n`,
+      );
+    }
     if (players.length === 2) {
-      await handleConnection(players);
+      handleLobby(currentLobbyId);
       players = [];
     }
   }
