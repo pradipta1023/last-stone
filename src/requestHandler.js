@@ -38,6 +38,27 @@ const closeConnections = async (players) => {
   }
 };
 
+const createSticks = (length) => Array(length).fill("🦯").join("");
+
+const pad = (str, length) => {
+  let newStr;
+  const totalLength = 50;
+  const padLength = totalLength - length;
+  const padStart = Math.ceil(padLength / 2);
+  const padEnd = padLength - padStart;
+
+  newStr = str.padStart(padStart);
+  newStr = newStr.padEnd(padEnd);
+  return newStr;
+};
+
+const sticksRemainingMessage = (sticksLeft) => {
+  const stars = "*".repeat(50);
+  const sticksRemaining = `\n${stars}
+  ${pad(createSticks(sticksLeft), sticksLeft)}\n${stars}\n`;
+  return sticksRemaining;
+};
+
 const handleConnection = async (players) => {
   await broadcast(players, "\nReady to play!!\n");
   let [noOfSticks, turn, isError] = [8, 0, false];
@@ -51,7 +72,9 @@ const handleConnection = async (players) => {
     }
     turn = 1 - turn;
     noOfSticks -= Number(userInput.parsedInput);
-    await broadcast(players, `\nSticks left: ${noOfSticks}\n`);
+
+    await broadcast(players, sticksRemainingMessage(noOfSticks));
+    noOfSticks;
     if (noOfSticks === 1) break;
   }
 
