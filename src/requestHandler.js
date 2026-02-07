@@ -5,15 +5,30 @@ const decoder = new TextDecoder();
 const buffer = new Uint8Array(1024);
 
 const broadcast = async (players, message) => {
-  for (const player of players) {
-    await write(player.conn, message);
+  for (let i = 0; i < players.length; i++) {
+    const player = players[i];
+    try {
+      await write(player.conn, message);
+    } catch {
+      console.log("Player left while broadcasting");
+      players.splice(i, 1);
+      return { isClosed: true };
+    }
   }
+  return { isClosed: false };
 };
 
 const isInRange = (value) => value >= 1 && value <= 3;
 
-const write = async (conn, message) =>
-  await conn.write(encoder.encode(message));
+const write = async (conn, message) => {
+  try {
+    await conn.write(encoder.encode(message));
+  } catch {
+    console.log("Player left while giving name");
+    return { isClosed: true };
+  }
+  return { isClosed: false };
+};
 
 const getUserInput = async (player, noOfSticks) => {
   await write(player.conn, "\nEnter your move \n> ");
@@ -30,12 +45,6 @@ const getUserInput = async (player, noOfSticks) => {
   }
 
   return { parsedInput };
-};
-
-const closeConnections = async (players) => {
-  for (const player of players) {
-    await player.conn.close();
-  }
 };
 
 const createSticks = (length) => Array(length).fill("🦯").join("");
@@ -59,7 +68,8 @@ const sticksRemainingMessage = (sticksLeft) => {
   return sticksRemaining;
 };
 
-const handleConnection = async (players) => {
+const handleConnection = async (roomId) => {
+  const players = lobby[roomId];
   await broadcast(players, "\nReady to play!!\n");
   let [noOfSticks, turn, isError] = [8, 0, false];
 
@@ -73,14 +83,19 @@ const handleConnection = async (players) => {
     turn = 1 - turn;
     noOfSticks -= Number(userInput.parsedInput);
 
-    await broadcast(players, sticksRemainingMessage(noOfSticks));
+    const hasLeft =
+      (await broadcast(players, sticksRemainingMessage(noOfSticks))).isClosed;
+    if (hasLeft) {
+      await broadcast(players, "Your opponent left");
+      return;
+    }
     noOfSticks;
     if (noOfSticks === 1) break;
   }
 
   if (isError) await broadcast(players, "\nYour opponent left\n");
   else await broadcast(players, `Winner: ${players[1 - turn].name}\n`);
-  await closeConnections(players);
+  await handleCloseConnection(roomId);
 };
 
 const lobby = {};
@@ -92,27 +107,38 @@ function* generateId() {
   }
 }
 
+const handleCloseConnection = async (roomId) => {
+  const players = lobby[roomId];
+
+  for (const player of players) {
+    await player.conn.close();
+  }
+
+  delete lobby[roomId];
+  console.log(`Room closed with room id: ${roomId}`);
+};
+
 const handleLobby = async (roomId) => {
   console.log(`Room opened with room id: ${roomId}`);
-
+  const players = lobby[roomId];
   let i = 0;
-  for (const player of lobby[roomId]) {
-    await player.conn.write(encoder.encode("\nEnter your name\n> "));
+  for (const player of players) {
+    await write(player.conn, "\nEnter your name\n> ");
+
     const bytesRead = await player.conn.read(buffer);
     if (bytesRead === null) {
       players.splice(i, 1);
-      broadcast(lobby[roomId], "Your opponent left");
-      return;
+      await broadcast(players, "\nYour opponent left\n");
+      return await handleCloseConnection(roomId);
     }
+
     const name = decoder.decode(buffer.subarray(0, bytesRead));
     player["name"] = name;
     i++;
   }
 
-  await handleConnection(lobby[roomId]);
+  await handleConnection(roomId);
   console.log(`Room closed with room id: ${roomId}`);
-
-  delete lobby[roomId];
 };
 
 export const listen = async (port) => {
