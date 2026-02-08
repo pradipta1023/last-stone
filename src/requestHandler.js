@@ -30,19 +30,22 @@ export const write = async (conn, message) => {
 
 const getUserInput = async (player, noOfSticks) => {
   await write(player.conn, "\nEnter your move \n> ");
-  const bytesRead = await player.conn.read(buffer);
-  if (bytesRead === null) return { isClosed: true };
-  const userInput = decoder.decode(buffer.slice(0, bytesRead));
-  const parsedInput = +userInput;
-  const isNotInteger = !Number.isInteger(parsedInput);
-  const sticksLeft = noOfSticks - parsedInput;
+  try {
+    const bytesRead = await player.conn.read(buffer);
+    if (bytesRead === null) return { isClosed: true };
+    const userInput = decoder.decode(buffer.slice(0, bytesRead));
+    const parsedInput = +userInput;
+    const isNotInteger = !Number.isInteger(parsedInput);
+    const sticksLeft = noOfSticks - parsedInput;
 
-  if (isNotInteger || !isInRange(parsedInput) || sticksLeft < 0) {
-    await write(player.conn, `\n${userInput.trim()} is not a valid move\n`);
-    return getUserInput(player);
+    if (isNotInteger || !isInRange(parsedInput) || sticksLeft < 0) {
+      await write(player.conn, `\n${userInput.trim()} is not a valid move\n`);
+      return getUserInput(player);
+    }
+    return { parsedInput };
+  } catch {
+    return { isClosed: true };
   }
-
-  return { parsedInput };
 };
 
 const createSticks = (length) => Array(length).fill(" 🦯 ").join("");
