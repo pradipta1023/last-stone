@@ -18,15 +18,23 @@ export const handleLobby = async (lobby, roomId) => {
       (await write(player.conn, "\nEnter your name\n> ")).isClosed;
     if (hasLeft) return await handleCloseConnection(lobby, roomId);
 
-    const bytesRead = await player.conn.read(buffer);
-    if (bytesRead === null) {
-      players.splice(i, 1);
-      await broadcast(players, "\nYour opponent left\n");
-      return await handleCloseConnection(lobby, roomId);
+    try {
+      const bytesRead = await player.conn.read(buffer);
+      if (bytesRead === null) {
+        players.splice(i, 1);
+        await broadcast(players, "\nYour opponent left\n");
+        return await handleCloseConnection(lobby, roomId);
+      }
+      const name = decoder.decode(buffer.subarray(0, bytesRead));
+      player["name"] = name;
+    } catch {
+      await broadcast(
+        players,
+        "\nUnexpected error appeared\nPlease join again\n",
+      );
+      await handleCloseConnection(lobby, roomId);
+      return;
     }
-
-    const name = decoder.decode(buffer.subarray(0, bytesRead));
-    player["name"] = name;
   }
 
   await handleConnection(lobby, roomId);
