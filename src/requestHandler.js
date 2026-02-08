@@ -1,10 +1,8 @@
-export const init = async (port) => await Deno.listen({ port });
-
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const buffer = new Uint8Array(1024);
 
-const broadcast = async (players, message) => {
+export const broadcast = async (players, message) => {
   for (let i = 0; i < players.length; i++) {
     const player = players[i];
     try {
@@ -20,7 +18,7 @@ const broadcast = async (players, message) => {
 
 const isInRange = (value) => value >= 1 && value <= 3;
 
-const write = async (conn, message) => {
+export const write = async (conn, message) => {
   try {
     await conn.write(encoder.encode(message));
   } catch {
@@ -47,7 +45,7 @@ const getUserInput = async (player, noOfSticks) => {
   return { parsedInput };
 };
 
-const createSticks = (length) => Array(length).fill("🦯").join("");
+const createSticks = (length) => Array(length).fill(" 🦯 ").join("");
 
 const pad = (str, length) => {
   let newStr;
@@ -68,10 +66,23 @@ const sticksRemainingMessage = (sticksLeft) => {
   return sticksRemaining;
 };
 
-const handleConnection = async (roomId) => {
+export const handleCloseConnection = async (lobby, roomId) => {
   const players = lobby[roomId];
-  await broadcast(players, "\nReady to play!!\n");
-  let [noOfSticks, turn, isError] = [8, 0, false];
+
+  for (const player of players) {
+    await player.conn.close();
+  }
+
+  delete lobby[roomId];
+  console.log(`Room closed with room id: ${roomId}`);
+  return true;
+};
+
+export const handleConnection = async (lobby, roomId) => {
+  const players = lobby[roomId];
+  const readyMsg = "\nReady to play!!\n";
+  let [noOfSticks, turn, isError, winWhileLastLeft] = [8, 0, false, false];
+  await broadcast(players, readyMsg + sticksRemainingMessage(noOfSticks));
 
   while (noOfSticks > 0) {
     const userInput = await getUserInput(players[turn], noOfSticks);
@@ -85,80 +96,17 @@ const handleConnection = async (roomId) => {
 
     const hasLeft =
       (await broadcast(players, sticksRemainingMessage(noOfSticks))).isClosed;
-    if (hasLeft) {
-      await broadcast(players, "Your opponent left");
-      return;
-    }
+
+    if (hasLeft) return await broadcast(players, "Your opponent left");
+
     noOfSticks;
-    if (noOfSticks === 1) break;
+    if (noOfSticks === 1) {
+      winWhileLastLeft = true;
+      break;
+    }
   }
-
+  const winner = winWhileLastLeft ? players[1 - turn].name : players[turn].name;
   if (isError) await broadcast(players, "\nYour opponent left\n");
-  else await broadcast(players, `Winner: ${players[1 - turn].name}\n`);
-  await handleCloseConnection(roomId);
-};
-
-const lobby = {};
-
-function* generateId() {
-  let i = 0;
-  while (true) {
-    yield i++;
-  }
-}
-
-const handleCloseConnection = async (roomId) => {
-  const players = lobby[roomId];
-
-  for (const player of players) {
-    await player.conn.close();
-  }
-
-  delete lobby[roomId];
-  console.log(`Room closed with room id: ${roomId}`);
-};
-
-const handleLobby = async (roomId) => {
-  console.log(`Room opened with room id: ${roomId}`);
-  const players = lobby[roomId];
-  let i = 0;
-  for (const player of players) {
-    await write(player.conn, "\nEnter your name\n> ");
-
-    const bytesRead = await player.conn.read(buffer);
-    if (bytesRead === null) {
-      players.splice(i, 1);
-      await broadcast(players, "\nYour opponent left\n");
-      return await handleCloseConnection(roomId);
-    }
-
-    const name = decoder.decode(buffer.subarray(0, bytesRead));
-    player["name"] = name;
-    i++;
-  }
-
-  await handleConnection(roomId);
-  console.log(`Room closed with room id: ${roomId}`);
-};
-
-export const listen = async (port) => {
-  const listener = await init(port);
-  const idIterator = generateId();
-  let players = [];
-  let currentLobbyId;
-  for await (const conn of listener) {
-    players.push({ conn });
-    if (players.length === 1) {
-      currentLobbyId = idIterator.next().value;
-      lobby[currentLobbyId] = players;
-      await broadcast(
-        lobby[currentLobbyId],
-        `\nWaiting for another player to join\n`,
-      );
-    }
-    if (players.length === 2) {
-      handleLobby(currentLobbyId);
-      players = [];
-    }
-  }
+  else await broadcast(players, `Winner: ${winner}\n`);
+  await handleCloseConnection(lobby, roomId);
 };
