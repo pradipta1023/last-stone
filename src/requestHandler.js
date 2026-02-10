@@ -1,3 +1,5 @@
+import { botMove } from "./bot.js";
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const buffer = new Uint8Array(1024);
@@ -84,7 +86,7 @@ export const handleCloseConnection = async (lobby, roomId) => {
 export const handleConnection = async (lobby, roomId) => {
   const players = lobby[roomId];
   const readyMsg = "\nReady to play!!\n";
-  let [noOfSticks, turn, isError, winWhileLastLeft] = [8, 0, false, false];
+  let [noOfSticks, turn, isError, winWhileLastLeft] = [10, 0, false, false];
   await broadcast(players, readyMsg + sticksRemainingMessage(noOfSticks));
 
   while (noOfSticks > 0) {
@@ -102,14 +104,44 @@ export const handleConnection = async (lobby, roomId) => {
 
     if (hasLeft) return await broadcast(players, "Your opponent left");
 
-    noOfSticks;
     if (noOfSticks === 1) {
       winWhileLastLeft = true;
       break;
     }
   }
   const winner = winWhileLastLeft ? players[1 - turn].name : players[turn].name;
-  if (isError) await broadcast(players, "\nYour opponent left\n");
-  else await broadcast(players, `Winner: ${winner}\n`);
+  const msgToShow = isError ? "\nYour opponent left\n" : `Winner: ${winner}\n`;
+
+  await broadcast(players, msgToShow);
   await handleCloseConnection(lobby, roomId);
+};
+
+export const playWithBot = async (player) => {
+  // await write(player.conn, "\nPlaying With BOT\n");
+  let noOfSticks = 10;
+  let turn = 0;
+  while (noOfSticks > 0) {
+    const userInput = await getUserInput(player, noOfSticks);
+    if (userInput.isClosed) return console.log(`${player.name} left the game`);
+
+    noOfSticks -= userInput.parsedInput;
+    if (noOfSticks === 1) break;
+    turn = 1 - turn;
+
+    const moveOfBot = botMove(noOfSticks);
+    noOfSticks -= moveOfBot;
+    const repsonse = await write(player.conn, `Bot's move: ${moveOfBot}`);
+    if (repsonse.isClosed) return console.log(`${player.name} left the game`);
+    await write(player.conn, sticksRemainingMessage(noOfSticks));
+
+    if (noOfSticks === 1) break;
+    turn = 1 - turn;
+  }
+  if (turn === 1) await write(player.conn, "\nBot wins\n");
+  else await write(player.conn, `\n${player.name} wins\n`);
+  try {
+    await player.conn.close();
+  } catch {
+    console.log("Player left");
+  }
 };
